@@ -11,10 +11,10 @@ import (
 )
 
 type Message struct {
-	Source  string
-	Dest    string
-	Type    string // this could be an enum
-	Message map[string]interface{}
+	Source  string                 `json:"source`
+	Dest    string                 `json:"dest"`
+	Type    string                 `json:"type"` // this could be an enum
+	Message map[string]interface{} `json:"message"`
 }
 
 type BPDU struct {
