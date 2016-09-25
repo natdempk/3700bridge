@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,9 +17,9 @@ type Message struct {
 }
 
 type BPDU struct {
-	RootID   string
-	Cost     int
-	BridgeID string
+	RootID   string `json:"root"`
+	Cost     int    `json:"cost"`
+	BridgeID string `json:"id"`
 }
 
 type LANForwardingEntry struct {
@@ -83,27 +82,27 @@ func main() {
 		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
 	}
 
-	fmt.Println("LAN CONNS")
-	fmt.Println(LANConns)
+	//	fmt.Println("LAN CONNS")
+	// fmt.Println(LANConns)
 	fmt.Println("broadcast bpdu")
 
 	broadcastBPDU(bestScoringBPDU)
 
-	//testBPDUString := `{"source":"02a1", "dest":"ffff", "type": "bpdu", "message":{"id":"92b4", "root":"02a1", "cost":3}}`
-	//testBPDU := []byte(testBPDUString)
-	//testDataString := `{"source":"28aa", "dest":"97bf", "type": "data", "message":{"id": 17}}`
-	//unknownMessage := parseMessage(testBPDU)
-
 	for lanID, LANConn := range LANConns {
 		fmt.Println("creating goroutine ", lanID)
 		go func() {
+			fmt.Println("CREATED GOROUTINE, trying to read messages ", lanID)
 			for {
-				fmt.Println("CREATED GOROUTINE, trying to read messages ", lanID)
-				s, _ := bufio.NewReader(LANConn).ReadString('\x00')
-				messageBytes := []byte(s)
+				var buf []byte
+				bitscopied, err := LANConn.Read(buf[:])
+				if err {
+					fmt.Println(err)
+				}
+
+				fmt.Println("Parsed message successfully")
 				var unknownMessage Message
 
-				if err := json.Unmarshal(messageBytes, &unknownMessage); err != nil {
+				if err := json.Unmarshal(buf, &unknownMessage); err != nil {
 					fmt.Printf("horrible error\n")
 					panic(err)
 				}
@@ -137,14 +136,14 @@ func main() {
 func sendData(message Message, incomingLan string) {
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
 		conn, _ := LANConns[val.LANID]
-		bytes, _ := json.Marshal(&message)
+		bytes, _ := json.Marshal(message)
 		fmt.Fprintf(conn, string(bytes))
 	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
 		// for each active port, send the message
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
 				conn, _ := LANConns[k]
-				bytes, _ := json.Marshal(&message)
+				bytes, _ := json.Marshal(message)
 				fmt.Fprintf(conn, string(bytes))
 			}
 		}
@@ -163,14 +162,7 @@ func broadcastBPDU(bpdu BPDU) {
 		Message: dataMessage}
 
 	for lanID, conn := range LANConns {
-
-		fmt.Println("aaa")
-		fmt.Println(lanID, conn)
-	}
-
-	for lanID, conn := range LANConns {
-		fmt.Println(lanID, conn)
-		bytes, err := json.Marshal(&message)
+		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
