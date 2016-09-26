@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,13 +17,12 @@ type Message struct {
 }
 
 type BPDU struct {
-	RootID   string
-	Cost     int
-	BridgeID string
+	RootID   string `json:"root"`
+	Cost     int    `json:"cost"`
+	BridgeID string `json:"id"`
 }
 
 type LANForwardingEntry struct {
-	//Address   string
 	LANID     string
 	CreatedAt time.Time
 }
@@ -98,13 +96,14 @@ func main() {
 		fmt.Println("creating goroutine ", lanID)
 		go func() {
 			for {
-				fmt.Println("CREATED GOROUTINE, trying to read messages ", lanID)
-				s, _ := bufio.NewReader(LANConn).ReadString('\x00')
-				messageBytes := []byte(s)
-				var unknownMessage Message
+				fmt.Println("goroutine trying to read messages for ", lanID)
+				d := json.NewDecoder(LANConn)
+				fmt.Println("parsed message successfully")
 
-				if err := json.Unmarshal(messageBytes, &unknownMessage); err != nil {
-					fmt.Printf("horrible error\n")
+				var unknownMessage Message
+				err := d.Decode(&unknownMessage)
+				if err != nil {
+					fmt.Printf("horrible error")
 					panic(err)
 				}
 
@@ -137,14 +136,14 @@ func main() {
 func sendData(message Message, incomingLan string) {
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
 		conn, _ := LANConns[val.LANID]
-		bytes, _ := json.Marshal(&message)
+		bytes, _ := json.Marshal(message)
 		fmt.Fprintf(conn, string(bytes))
 	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
 		// for each active port, send the message
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
 				conn, _ := LANConns[k]
-				bytes, _ := json.Marshal(&message)
+				bytes, _ := json.Marshal(message)
 				fmt.Fprintf(conn, string(bytes))
 			}
 		}
@@ -170,7 +169,7 @@ func broadcastBPDU(bpdu BPDU) {
 
 	for lanID, conn := range LANConns {
 		fmt.Println(lanID, conn)
-		bytes, err := json.Marshal(&message)
+		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
@@ -232,6 +231,6 @@ func updateBPDU(message Message, incomingLan string) {
 
 func parseMessage(bytes []byte) (message Message) {
 	message = Message{}
-	json.Unmarshal(bytes, &message)
+	json.Unmarshal(bytes, message)
 	return
 }
