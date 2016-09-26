@@ -41,6 +41,7 @@ var bestScoringBPDU BPDU
 
 // this is the next hop bridge to root
 var designatedBridgeID string
+var rootPort string = "zzzzzzzzzzzz"
 
 // are these enabled lan connections or enabled bridgeIdConnections? I think bridgeIDs
 // then we need to keep the forwarding table of LanID -> bridgeId for that connection
@@ -75,10 +76,15 @@ func main() {
 		}
 		LANConns[lanID] = conn
 		enabledLANConns[lanID] = true
-		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
+		// fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
 	}
 
-	broadcastBPDU(bestScoringBPDU)
+	go func() {
+		for {
+			broadcastBPDU(bestScoringBPDU)
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
 
 	for lanID, LANConn := range LANConns {
 		go listenForMessage(lanID, LANConn)
@@ -108,13 +114,17 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 			}
 
 		} else {
-			fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
-			sendData(unknownMessage, lanID)
+			fmt.Println(enabledLANConns)
+			// fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
+			if enabledLANConns[lanID] {
+				sendData(unknownMessage, lanID)
+			}
 		}
 	}
 }
 
 func sendData(message Message, incomingLan string) {
+	fmt.Println(enabledLANConns)
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
 		conn, _ := LANConns[val.LANID]
 		bytes, _ := json.Marshal(message)
@@ -142,12 +152,13 @@ func broadcastBPDU(bpdu BPDU) {
 		Type:    "bpdu",
 		Message: dataMessage}
 
-	for _, conn := range LANConns {
+	for lanId, conn := range LANConns {
 		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
 		}
+		fmt.Println(lanId, "sent bpdu")
 		fmt.Fprintf(conn, string(bytes))
 	}
 }
@@ -160,44 +171,47 @@ func updateBPDU(message Message, incomingLan string) {
 		Cost:     intCost,
 		BridgeID: BPDUMessage["id"].(string),
 	}
+	fmt.Println(receivedBPDU, incomingLan)
 
-	if (bestScoringBPDU.RootID < receivedBPDU.RootID) ||
-		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-			bestScoringBPDU.Cost < receivedBPDU.Cost) ||
-		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-			bestScoringBPDU.Cost < receivedBPDU.Cost &&
-			bestScoringBPDU.BridgeID < receivedBPDU.BridgeID) {
-		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-		// do nothing
-	} else {
-		bestScoringBPDU.Cost++
-
-		if bestScoringBPDU.RootID != receivedBPDU.RootID {
-			bestScoringBPDU.RootID = receivedBPDU.RootID
-			fmt.Printf("New root: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-		}
-
-		designatedBridgeID = receivedBPDU.BridgeID
-		broadcastBPDU(bestScoringBPDU)
-	}
-
-	// equidistant case
+	// equidistant lan case
 	if bestScoringBPDU.RootID == receivedBPDU.RootID &&
 		bestScoringBPDU.Cost == receivedBPDU.Cost &&
 		bestScoringBPDU.BridgeID > receivedBPDU.BridgeID {
 		// same root, and taking that root would have the same cost as our cost
 		// if our bridge id is higher than theirs disable the port for lan traffic
 		enabledLANConns[incomingLan] = false
-		fmt.Printf("Disabled port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-
+		fmt.Printf("Disabled port part 1: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+		// equidistant bridge
 	} else if bestScoringBPDU.RootID == receivedBPDU.RootID &&
 		bestScoringBPDU.Cost == receivedBPDU.Cost+1 &&
-		designatedBridgeID < receivedBPDU.BridgeID {
-		// we have a 1 higher cost, same root id, our designated bridge id is higher than theirs
+		rootPort < incomingLan {
+		// we have the same cost, same root id, our designated bridge id is higher than or equal to theirs
 		enabledLANConns[incomingLan] = false
-		fmt.Printf("Disabled port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+		fmt.Printf("Disabled port part 2: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
 	} else { // enable the port
-		enabledLANConns[incomingLan] = true
+		// enabledLANConns[incomingLan] = true
+	}
+
+	if (bestScoringBPDU.RootID < receivedBPDU.RootID) ||
+		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
+			bestScoringBPDU.Cost < receivedBPDU.Cost) ||
+		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
+			bestScoringBPDU.Cost == receivedBPDU.Cost &&
+			bestScoringBPDU.BridgeID < receivedBPDU.BridgeID) {
+		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+		// do nothing
+	} else {
+		bestScoringBPDU.Cost = receivedBPDU.Cost + 1
+
+		if bestScoringBPDU.RootID != receivedBPDU.RootID {
+			bestScoringBPDU.RootID = receivedBPDU.RootID
+			fmt.Printf("New root: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+		}
+		if incomingLan < rootPort {
+			rootPort = incomingLan
+			enabledLANConns[incomingLan] = true
+		}
+		designatedBridgeID = receivedBPDU.BridgeID
 	}
 
 }
