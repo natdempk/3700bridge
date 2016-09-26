@@ -10,7 +10,7 @@ import (
 )
 
 type Message struct {
-	Source  string                 `json:"source`
+	Source  string                 `json:"source"`
 	Dest    string                 `json:"dest"`
 	Type    string                 `json:"type"` // this could be an enum
 	Message map[string]interface{} `json:"message"`
@@ -60,9 +60,6 @@ func main() {
 	designatedBridgeID = myBridgeID
 	bestScoringBPDU = BPDU{myBridgeID, 0, myBridgeID}
 	lanIDs := os.Args[2:]
-	fmt.Println("lanIDs")
-	fmt.Println(lanIDs)
-
 	fmt.Printf("Bridge %s starting up\n", myBridgeID)
 
 	for _, lanID := range lanIDs {
@@ -81,75 +78,53 @@ func main() {
 		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
 	}
 
-	fmt.Println("LAN CONNS")
-	fmt.Println(LANConns)
-	fmt.Println("broadcast bpdu")
-
 	broadcastBPDU(bestScoringBPDU)
 
-	//testBPDUString := `{"source":"02a1", "dest":"ffff", "type": "bpdu", "message":{"id":"92b4", "root":"02a1", "cost":3}}`
-	//testBPDU := []byte(testBPDUString)
-	//testDataString := `{"source":"28aa", "dest":"97bf", "type": "data", "message":{"id": 17}}`
-	//unknownMessage := parseMessage(testBPDU)
-
 	for lanID, LANConn := range LANConns {
-		fmt.Println("creating goroutine ", lanID)
-		go func() {
-			for {
-				fmt.Println("goroutine trying to read messages for ", lanID)
-				d := json.NewDecoder(LANConn)
-				fmt.Println("parsed message successfully")
-
-				var unknownMessage Message
-				err := d.Decode(&unknownMessage)
-				if err != nil {
-					fmt.Printf("horrible error")
-					panic(err)
-				}
-
-				fmt.Println("unknownMessage")
-				fmt.Println(unknownMessage)
-
-				if unknownMessage.Type == "bpdu" {
-					fmt.Println("bpduuuuuuuuuu")
-					// updateBPDU(unknownMessage, lanID)
-					receivedBPDUs <- IncomingBPDU{BPDU: unknownMessage,
-						LanID: lanID,
-					}
-
-				} else {
-					fmt.Println("id", unknownMessage.Message["id"])
-					fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
-					sendData(unknownMessage, lanID)
-				}
-			}
-		}()
-		fmt.Println("post created goroutine ", lanID)
+		go listenForMessage(lanID, LANConn)
 	}
 
 	for {
-		fmt.Println("looping waiting on BPDUs")
 		incomingBPDU := <-receivedBPDUs
 		updateBPDU(incomingBPDU.BPDU, incomingBPDU.LanID)
 	}
 }
 
+func listenForMessage(lanID string, LANConn net.Conn) {
+	d := json.NewDecoder(LANConn)
+	for {
+
+		var unknownMessage Message
+		err := d.Decode(&unknownMessage)
+		if err != nil {
+			fmt.Printf("horrible error")
+			panic(err)
+		}
+
+		if unknownMessage.Type == "bpdu" {
+			// updateBPDU(unknownMessage, lanID)
+			receivedBPDUs <- IncomingBPDU{BPDU: unknownMessage,
+				LanID: lanID,
+			}
+
+		} else {
+			fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
+			sendData(unknownMessage, lanID)
+		}
+	}
+}
+
 func sendData(message Message, incomingLan string) {
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
-		fmt.Println("found message in forwarding table for ", message.Dest)
 		conn, _ := LANConns[val.LANID]
 		bytes, _ := json.Marshal(message)
 		fmt.Fprintf(conn, string(bytes))
 	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
 		// for each active port, send the message
-		fmt.Println("no message found for dest ", message.Dest, "sending it everywhere except ", incomingLan)
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
-				fmt.Println("sending out on ", k)
-				fmt.Println("sending out message ", message)
 				conn, _ := LANConns[k]
 				bytes, _ := json.Marshal(message)
-				fmt.Println(bytes)
 				fmt.Fprintf(conn, string(bytes))
 			}
 		}
@@ -167,29 +142,22 @@ func broadcastBPDU(bpdu BPDU) {
 		Type:    "bpdu",
 		Message: dataMessage}
 
-	for lanID, conn := range LANConns {
-
-		fmt.Println("aaa")
-		fmt.Println(lanID, conn)
-	}
-
-	for lanID, conn := range LANConns {
-		fmt.Println(lanID, conn)
+	for _, conn := range LANConns {
 		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
 		}
 		fmt.Fprintf(conn, string(bytes))
-		fmt.Println("sent BPDU to ", lanID)
 	}
-	fmt.Println("done sending bpdu")
 }
 
 func updateBPDU(message Message, incomingLan string) {
 	BPDUMessage := message.Message
+	cost := BPDUMessage["cost"].(float64)
+	intCost := int(cost)
 	receivedBPDU := BPDU{RootID: BPDUMessage["root"].(string),
-		Cost:     BPDUMessage["cost"].(int),
+		Cost:     intCost,
 		BridgeID: BPDUMessage["id"].(string),
 	}
 
