@@ -118,7 +118,8 @@ func main() {
 					}
 
 				} else {
-					fmt.Printf("Received message %s on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
+					fmt.Println("id", unknownMessage.Message["id"])
+					fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
 					sendData(unknownMessage, lanID)
 				}
 			}
@@ -135,15 +136,20 @@ func main() {
 
 func sendData(message Message, incomingLan string) {
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
+		fmt.Println("found message in forwarding table for ", message.Dest)
 		conn, _ := LANConns[val.LANID]
 		bytes, _ := json.Marshal(message)
 		fmt.Fprintf(conn, string(bytes))
 	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
 		// for each active port, send the message
+		fmt.Println("no message found for dest ", message.Dest, "sending it everywhere except ", incomingLan)
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
+				fmt.Println("sending out on ", k)
+				fmt.Println("sending out message ", message)
 				conn, _ := LANConns[k]
 				bytes, _ := json.Marshal(message)
+				fmt.Println(bytes)
 				fmt.Fprintf(conn, string(bytes))
 			}
 		}
@@ -204,7 +210,6 @@ func updateBPDU(message Message, incomingLan string) {
 		}
 
 		designatedBridgeID = receivedBPDU.BridgeID
-
 		broadcastBPDU(bestScoringBPDU)
 	}
 
@@ -229,8 +234,8 @@ func updateBPDU(message Message, incomingLan string) {
 
 }
 
-func parseMessage(bytes []byte) (message Message) {
-	message = Message{}
-	json.Unmarshal(bytes, message)
-	return
-}
+//func parseMessage(bytes []byte) (message Message) {
+//message = Message{}
+//json.Unmarshal(bytes, message)
+//return
+//}
