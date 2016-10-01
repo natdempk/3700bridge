@@ -32,16 +32,29 @@ type IncomingBPDU struct {
 	LanID string
 }
 
+type BPDUTableEntry struct {
+	BPDU        BPDU
+	IncomingLAN string
+	CreatedAt   time.Time
+}
+
+type BPDUTableKey struct {
+	BridgeID string
+	LANID    string
+}
+
 // maps lanIds to Conns
 var LANConns = make(map[string]net.Conn)
 
 // has best scoring root, and path cost
 // always our bridgeID because this is the BPDU we broadcast to others
-var bestScoringBPDU BPDU
+//var bestScoringBPDU BPDU
+var outgoingBPDU BPDU
+var initialBPDU BPDU
 
 // this is the next hop bridge to root
 var designatedBridgeID string
-var rootPort string = "zzzzzzzzzzzz"
+var rootPort string
 
 // are these enabled lan connections or enabled bridgeIdConnections? I think bridgeIDs
 // then we need to keep the forwarding table of LanID -> bridgeId for that connection
@@ -50,6 +63,7 @@ var enabledLANConns = make(map[string]bool)
 //var forwardingTable []LANForwardingEntry
 var fowardingTableMap = make(map[string]LANForwardingEntry)
 
+var BPDUTable = make(map[BPDUTableKey]BPDUTableEntry)
 var receivedBPDUs = make(chan IncomingBPDU)
 
 func padLANID(lanID string) (paddedID string) {
@@ -59,7 +73,8 @@ func padLANID(lanID string) (paddedID string) {
 func main() {
 	myBridgeID := os.Args[1]
 	designatedBridgeID = myBridgeID
-	bestScoringBPDU = BPDU{myBridgeID, 0, myBridgeID}
+	outgoingBPDU = BPDU{myBridgeID, 0, myBridgeID}
+	initialBPDU = BPDU{myBridgeID, 0, myBridgeID}
 	lanIDs := os.Args[2:]
 	fmt.Printf("Bridge %s starting up\n", myBridgeID)
 
@@ -81,7 +96,7 @@ func main() {
 
 	go func() {
 		for {
-			broadcastBPDU(bestScoringBPDU)
+			broadcastBPDU(outgoingBPDU)
 			time.Sleep(500 * time.Millisecond)
 		}
 	}()
@@ -92,7 +107,49 @@ func main() {
 
 	for {
 		incomingBPDU := <-receivedBPDUs
-		updateBPDU(incomingBPDU.BPDU, incomingBPDU.LanID)
+
+		BPDUMessage := incomingBPDU.BPDU.Message
+		cost := BPDUMessage["cost"].(float64)
+		intCost := int(cost)
+		receivedBPDU := BPDU{RootID: BPDUMessage["root"].(string),
+			Cost:     intCost,
+			BridgeID: BPDUMessage["id"].(string),
+		}
+
+		// build potential table entry
+		tableKey := BPDUTableKey{
+			BridgeID: receivedBPDU.BridgeID,
+			LANID:    incomingBPDU.LanID,
+		}
+
+		val, ok := BPDUTable[tableKey]
+		potentialTableEntry := BPDUTableEntry{
+			BPDU:        receivedBPDU,
+			IncomingLAN: incomingBPDU.LanID,
+			CreatedAt:   time.Now(),
+		}
+
+		// check for previous entry with lesser LanID
+		if ok && (tableKey.LANID <= val.IncomingLAN) {
+			BPDUTable[tableKey] = potentialTableEntry
+		} else if !ok { // or if we have no entry
+			BPDUTable[tableKey] = potentialTableEntry
+		}
+
+		var currentBestBPDU BPDU
+
+		enabledLANConns, rootPort, currentBestBPDU = updateBPDU()
+
+		bestCost := currentBestBPDU.Cost
+		if initialBPDU.RootID != currentBestBPDU.RootID {
+			bestCost++
+		}
+
+		outgoingBPDU = BPDU{
+			RootID:   currentBestBPDU.RootID,
+			Cost:     bestCost,
+			BridgeID: initialBPDU.BridgeID,
+		}
 	}
 }
 
@@ -149,9 +206,9 @@ func sendData(message Message, incomingLan string) {
 
 func broadcastBPDU(bpdu BPDU) {
 	dataMessage := make(map[string]interface{})
-	dataMessage["id"] = bestScoringBPDU.BridgeID
-	dataMessage["root"] = bestScoringBPDU.RootID
-	dataMessage["cost"] = bestScoringBPDU.Cost
+	dataMessage["id"] = outgoingBPDU.BridgeID
+	dataMessage["root"] = outgoingBPDU.RootID
+	dataMessage["cost"] = outgoingBPDU.Cost
 
 	message := Message{Source: bpdu.BridgeID,
 		Dest:    "ffff",
@@ -169,56 +226,138 @@ func broadcastBPDU(bpdu BPDU) {
 	}
 }
 
-func updateBPDU(message Message, incomingLan string) {
-	BPDUMessage := message.Message
-	cost := BPDUMessage["cost"].(float64)
-	intCost := int(cost)
-	receivedBPDU := BPDU{RootID: BPDUMessage["root"].(string),
-		Cost:     intCost,
-		BridgeID: BPDUMessage["id"].(string),
+func min(a, b int) int {
+	if a < b {
+		return a
+
 	}
-	fmt.Println(receivedBPDU, incomingLan)
+	return b
+
+}
+
+func lowestCost(BPDUList []BPDU, rootID string) BPDU {
+	cost := BPDUList[0].Cost
+	for _, b := range BPDUList[1:] {
+		if b.RootID != rootID {
+			continue
+		}
+
+		cost = min(cost, b.Cost)
+	}
+
+	lowestCostBPDU := BPDUList[0]
+
+	for _, b := range BPDUList {
+		if b.RootID != rootID {
+			continue
+		}
+
+		if b.Cost == cost {
+			if b.BridgeID < lowestCostBPDU.BridgeID {
+				lowestCostBPDU = b
+			}
+		}
+	}
+
+	return lowestCostBPDU
+}
+
+//func updateBPDU(message Message, incomingLan string) {
+func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, currentBestBPDU BPDU) {
+	//fmt.Println(receivedBPDU, incomingLan)
+
+	currentBestBPDU = initialBPDU
+	BPDULans := make(map[string][]BPDU)
+	enabledLANs = make(map[string]bool)
+
+	// delete expired entries
+	for key, tableEntry := range BPDUTable {
+		if time.Since(tableEntry.CreatedAt).Seconds()*1000.0 < 750.0 {
+			delete(BPDUTable, key)
+		} else { // compare to find best one
+			BPDULans[tableEntry.IncomingLAN] = append(BPDULans[tableEntry.IncomingLAN], tableEntry.BPDU)
+
+			if (currentBestBPDU.RootID < tableEntry.BPDU.RootID) ||
+				(currentBestBPDU.RootID == tableEntry.BPDU.RootID &&
+					currentBestBPDU.Cost < tableEntry.BPDU.Cost) ||
+				(currentBestBPDU.RootID == tableEntry.BPDU.RootID &&
+					currentBestBPDU.Cost == tableEntry.BPDU.Cost &&
+					currentBestBPDU.BridgeID < tableEntry.BPDU.BridgeID) {
+				// do nothing
+			} else {
+				currentBestBPDU = tableEntry.BPDU
+				currentBestLANID = tableEntry.IncomingLAN
+			}
+		}
+	}
+
+	for LANID, BPDUs := range BPDULans {
+		if len(BPDUs) == 0 {
+			// enable LANs we got not BPDUs from
+			enabledLANs[LANID] = true
+		} else {
+			lowestCostBPDU := lowestCost(BPDUs, currentBestBPDU.RootID)
+
+			if currentBestBPDU.Cost+1 < lowestCostBPDU.Cost ||
+				(currentBestBPDU.Cost+1 == lowestCostBPDU.Cost &&
+					initialBPDU.BridgeID < lowestCostBPDU.BridgeID) {
+				// we are designated
+				enabledLANs[LANID] = true
+			} else {
+				enabledLANs[LANID] = false
+			}
+		}
+	}
+
+	// enable our root port
+	if currentBestLANID != "" {
+		enabledLANs[currentBestLANID] = true
+	}
+
+	return
+
+	//////////////////////////////////////////////
 
 	// equidistant lan case
-	if bestScoringBPDU.RootID == receivedBPDU.RootID &&
-		bestScoringBPDU.Cost == receivedBPDU.Cost &&
-		bestScoringBPDU.BridgeID > receivedBPDU.BridgeID {
-		// same root, and taking that root would have the same cost as our cost
-		// if our bridge id is higher than theirs disable the port for lan traffic
-		enabledLANConns[incomingLan] = false
-		fmt.Printf("Disabled port part 1: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-		// equidistant bridge
-	} else if bestScoringBPDU.RootID == receivedBPDU.RootID &&
-		bestScoringBPDU.Cost == receivedBPDU.Cost+1 &&
-		rootPort < incomingLan {
-		// we have the same cost, same root id, our designated bridge id is higher than or equal to theirs
-		enabledLANConns[incomingLan] = false
-		fmt.Printf("Disabled port part 2: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-	} else { // enable the port
-		// enabledLANConns[incomingLan] = true
-	}
+	//if bestScoringBPDU.RootID == receivedBPDU.RootID &&
+	//bestScoringBPDU.Cost == receivedBPDU.Cost &&
+	//bestScoringBPDU.BridgeID > receivedBPDU.BridgeID {
+	//// same root, and taking that root would have the same cost as our cost
+	//// if our bridge id is higher than theirs disable the port for lan traffic
+	//enabledLANConns[incomingLan] = false
+	//fmt.Printf("Disabled port part 1: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+	//// equidistant bridge
+	//} else if bestScoringBPDU.RootID == receivedBPDU.RootID &&
+	//bestScoringBPDU.Cost == receivedBPDU.Cost+1 &&
+	//rootPort < incomingLan {
+	//// we have the same cost, same root id, our designated bridge id is higher than or equal to theirs
+	//enabledLANConns[incomingLan] = false
+	//fmt.Printf("Disabled port part 2: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+	//} else { // enable the port
+	//// enabledLANConns[incomingLan] = true
+	//}
 
-	if (bestScoringBPDU.RootID < receivedBPDU.RootID) ||
-		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-			bestScoringBPDU.Cost < receivedBPDU.Cost) ||
-		(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-			bestScoringBPDU.Cost == receivedBPDU.Cost &&
-			bestScoringBPDU.BridgeID < receivedBPDU.BridgeID) {
-		fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-		// do nothing
-	} else {
-		bestScoringBPDU.Cost = receivedBPDU.Cost + 1
+	//if (bestScoringBPDU.RootID < receivedBPDU.RootID) ||
+	//(bestScoringBPDU.RootID == receivedBPDU.RootID &&
+	//bestScoringBPDU.Cost < receivedBPDU.Cost) ||
+	//(bestScoringBPDU.RootID == receivedBPDU.RootID &&
+	//bestScoringBPDU.Cost == receivedBPDU.Cost &&
+	//bestScoringBPDU.BridgeID < receivedBPDU.BridgeID) {
+	//fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+	//// do nothing
+	//} else {
+	//bestScoringBPDU.Cost = receivedBPDU.Cost + 1
 
-		if bestScoringBPDU.RootID != receivedBPDU.RootID {
-			bestScoringBPDU.RootID = receivedBPDU.RootID
-			fmt.Printf("New root: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-		}
-		if incomingLan < rootPort {
-			rootPort = incomingLan
-			enabledLANConns[incomingLan] = true
-		}
-		designatedBridgeID = receivedBPDU.BridgeID
-	}
+	//if bestScoringBPDU.RootID != receivedBPDU.RootID {
+	//bestScoringBPDU.RootID = receivedBPDU.RootID
+	//fmt.Printf("New root: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
+	//}
+	//if incomingLan < rootPort {
+	//rootPort = incomingLan
+	//enabledLANConns[incomingLan] = true
+	//}
+	//designatedBridgeID = receivedBPDU.BridgeID
+	//}
 
 }
 
