@@ -59,9 +59,10 @@ var rootPort string
 // are these enabled lan connections or enabled bridgeIdConnections? I think bridgeIDs
 // then we need to keep the forwarding table of LanID -> bridgeId for that connection
 var enabledLANConns = make(map[string]bool)
+var baseLANs = []string{}
 
 //var forwardingTable []LANForwardingEntry
-var fowardingTableMap = make(map[string]LANForwardingEntry)
+var forwardingTableMap = make(map[string]LANForwardingEntry)
 
 var BPDUTable = make(map[BPDUTableKey]BPDUTableEntry)
 var receivedBPDUs = make(chan IncomingBPDU)
@@ -91,6 +92,7 @@ func main() {
 		}
 		LANConns[lanID] = conn
 		enabledLANConns[lanID] = true
+		baseLANs = append(baseLANs, lanID)
 		// fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
 	}
 
@@ -174,10 +176,11 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 			fmt.Println(enabledLANConns)
 			// fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
 			if enabledLANConns[lanID] {
-				fowardingTableMap[unknownMessage.Source] = LANForwardingEntry{
+				forwardingTableMap[unknownMessage.Source] = LANForwardingEntry{
 					LANID:     lanID,
 					CreatedAt: time.Now(),
 				}
+
 				sendData(unknownMessage, lanID)
 			}
 		}
@@ -186,13 +189,13 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 
 func sendData(message Message, incomingLan string) {
 	fmt.Println(enabledLANConns)
-	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
-		if val.LANID != incomingLan {
+	if val, ok := forwardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
+		if val.LANID != incomingLan { // if where we would forward to is where we got the message from
 			conn, _ := LANConns[val.LANID]
 			bytes, _ := json.Marshal(message)
 			fmt.Fprintf(conn, string(bytes))
 		}
-	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
+	} else { // we don't know where to send our message, so we send it everywhere except the incoming port
 		// for each active port, send the message
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
@@ -215,13 +218,13 @@ func broadcastBPDU(bpdu BPDU) {
 		Type:    "bpdu",
 		Message: dataMessage}
 
-	for lanId, conn := range LANConns {
+	for lanID, conn := range LANConns {
 		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
 		}
-		fmt.Println(lanId, "sent bpdu")
+		fmt.Println(lanID, "sent bpdu")
 		fmt.Fprintf(conn, string(bytes))
 	}
 }
@@ -270,9 +273,14 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 	BPDULans := make(map[string][]BPDU)
 	enabledLANs = make(map[string]bool)
 
+	// initialize BPDULans
+	for _, lanID := range baseLANs {
+		BPDULans[lanID] = []BPDU{}
+	}
+
 	// delete expired entries
 	for key, tableEntry := range BPDUTable {
-		if time.Since(tableEntry.CreatedAt).Seconds()*1000.0 < 750.0 {
+		if time.Since(tableEntry.CreatedAt).Seconds()*1000.0 > 750.0 {
 			delete(BPDUTable, key)
 		} else { // compare to find best one
 			BPDULans[tableEntry.IncomingLAN] = append(BPDULans[tableEntry.IncomingLAN], tableEntry.BPDU)
