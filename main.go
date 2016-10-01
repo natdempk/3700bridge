@@ -117,6 +117,10 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 			fmt.Println(enabledLANConns)
 			// fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
 			if enabledLANConns[lanID] {
+				fowardingTableMap[unknownMessage.Source] = LANForwardingEntry{
+					LANID:     lanID,
+					CreatedAt: time.Now(),
+				}
 				sendData(unknownMessage, lanID)
 			}
 		}
@@ -126,9 +130,11 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 func sendData(message Message, incomingLan string) {
 	fmt.Println(enabledLANConns)
 	if val, ok := fowardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
-		conn, _ := LANConns[val.LANID]
-		bytes, _ := json.Marshal(message)
-		fmt.Fprintf(conn, string(bytes))
+		if val.LANID != incomingLan {
+			conn, _ := LANConns[val.LANID]
+			bytes, _ := json.Marshal(message)
+			fmt.Fprintf(conn, string(bytes))
+		}
 	} else { // we don't know where to send our message, so we send it everywhere except the incomping port
 		// for each active port, send the message
 		for k, v := range enabledLANConns {
