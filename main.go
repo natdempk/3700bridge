@@ -189,9 +189,9 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 
 func sendData(message Message, incomingLan string) {
 	fmt.Println(enabledLANConns)
-	if val, ok := forwardingTableMap[message.Dest]; ok && time.Since(val.CreatedAt).Seconds() < 5.0 {
-		if val.LANID != incomingLan { // if where we would forward to is where we got the message from
-			conn, _ := LANConns[val.LANID]
+	if tableEntry, ok := forwardingTableMap[message.Dest]; ok && time.Since(tableEntry.CreatedAt).Seconds() < 5.0 {
+		if tableEntry.LANID != incomingLan { // if where we would forward to is where we got the message from
+			conn, _ := LANConns[tableEntry.LANID]
 			bytes, _ := json.Marshal(message)
 			fmt.Fprintf(conn, string(bytes))
 		}
