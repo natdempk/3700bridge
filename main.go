@@ -265,7 +265,6 @@ func lowestCost(BPDUList []BPDU, rootID string) BPDU {
 	return lowestCostBPDU
 }
 
-//func updateBPDU(message Message, incomingLan string) {
 func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, currentBestBPDU BPDU) {
 	//fmt.Println(receivedBPDU, incomingLan)
 
@@ -323,54 +322,4 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 	}
 
 	return
-
-	//////////////////////////////////////////////
-
-	// equidistant lan case
-	//if bestScoringBPDU.RootID == receivedBPDU.RootID &&
-	//bestScoringBPDU.Cost == receivedBPDU.Cost &&
-	//bestScoringBPDU.BridgeID > receivedBPDU.BridgeID {
-	//// same root, and taking that root would have the same cost as our cost
-	//// if our bridge id is higher than theirs disable the port for lan traffic
-	//enabledLANConns[incomingLan] = false
-	//fmt.Printf("Disabled port part 1: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-	//// equidistant bridge
-	//} else if bestScoringBPDU.RootID == receivedBPDU.RootID &&
-	//bestScoringBPDU.Cost == receivedBPDU.Cost+1 &&
-	//rootPort < incomingLan {
-	//// we have the same cost, same root id, our designated bridge id is higher than or equal to theirs
-	//enabledLANConns[incomingLan] = false
-	//fmt.Printf("Disabled port part 2: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-	//} else { // enable the port
-	//// enabledLANConns[incomingLan] = true
-	//}
-
-	//if (bestScoringBPDU.RootID < receivedBPDU.RootID) ||
-	//(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-	//bestScoringBPDU.Cost < receivedBPDU.Cost) ||
-	//(bestScoringBPDU.RootID == receivedBPDU.RootID &&
-	//bestScoringBPDU.Cost == receivedBPDU.Cost &&
-	//bestScoringBPDU.BridgeID < receivedBPDU.BridgeID) {
-	//fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-	//// do nothing
-	//} else {
-	//bestScoringBPDU.Cost = receivedBPDU.Cost + 1
-
-	//if bestScoringBPDU.RootID != receivedBPDU.RootID {
-	//bestScoringBPDU.RootID = receivedBPDU.RootID
-	//fmt.Printf("New root: %s/%s\n", bestScoringBPDU.BridgeID, incomingLan)
-	//}
-	//if incomingLan < rootPort {
-	//rootPort = incomingLan
-	//enabledLANConns[incomingLan] = true
-	//}
-	//designatedBridgeID = receivedBPDU.BridgeID
-	//}
-
 }
-
-//func parseMessage(bytes []byte) (message Message) {
-//message = Message{}
-//json.Unmarshal(bytes, message)
-//return
-//}
