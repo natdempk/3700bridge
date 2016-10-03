@@ -135,16 +135,16 @@ func main() {
 
 		var currentBestBPDU BPDU
 
-		enabledLANConnsTemp, rootPortTemp, currentBestBPDU := updateBPDU()
+		newEnabledLANConns, newRootPort, currentBestBPDU := updateBPDU()
 
-		if compare(enabledLANConnsTemp, enabledLANConns) ||
-			rootPortTemp != rootPortTemp {
+		if compare(newEnabledLANConns, enabledLANConns) ||
+			newRootPort != rootPort {
 			for k := range forwardingTableMap {
 				delete(forwardingTableMap, k)
 			}
 		}
-		enabledLANConns = enabledLANConnsTemp
-		rootPort = rootPortTemp
+		enabledLANConns = newEnabledLANConns
+		rootPort = newRootPort
 
 		bestCost := currentBestBPDU.Cost
 
@@ -159,28 +159,6 @@ func main() {
 		}
 	}
 }
-func compare(a, b map[string]bool) bool {
-	if &a == &b {
-		return true
-
-	}
-
-	if len(a) != len(b) || len(a) != len(b) {
-		return false
-
-	}
-
-	for k, v := range a {
-		if b[k] != v {
-			return false
-
-		}
-
-	}
-	return true
-
-}
-
 func listenForMessage(lanID string, LANConn net.Conn) {
 	d := json.NewDecoder(LANConn)
 	for {
@@ -255,37 +233,6 @@ func broadcastBPDU(bpdu BPDU) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-
-	}
-	return b
-
-}
-
-func lowestCost(BPDUList []BPDU, rootID string) BPDU {
-	var lowestCostBPDU BPDU
-	foundThing := false
-	for _, b := range BPDUList {
-		if b.RootID != rootID {
-			continue
-		}
-		if !foundThing {
-			lowestCostBPDU = b
-			foundThing = true
-		} else {
-			if b.Cost < lowestCostBPDU.Cost ||
-				(b.Cost == lowestCostBPDU.Cost &&
-					b.BridgeID < lowestCostBPDU.BridgeID) {
-				lowestCostBPDU = b
-			}
-		}
-	}
-
-	return lowestCostBPDU
-}
-
 func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, currentBestBPDU BPDU) {
 	//fmt.Println(receivedBPDU, incomingLan)
 
@@ -343,4 +290,26 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 	}
 
 	return
+}
+
+func lowestCost(BPDUList []BPDU, rootID string) BPDU {
+	var lowestCostBPDU BPDU
+	foundThing := false
+	for _, b := range BPDUList {
+		if b.RootID != rootID {
+			continue
+		}
+		if !foundThing {
+			lowestCostBPDU = b
+			foundThing = true
+		} else {
+			if b.Cost < lowestCostBPDU.Cost ||
+				(b.Cost == lowestCostBPDU.Cost &&
+					b.BridgeID < lowestCostBPDU.BridgeID) {
+				lowestCostBPDU = b
+			}
+		}
+	}
+
+	return lowestCostBPDU
 }
