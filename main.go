@@ -239,24 +239,19 @@ func min(a, b int) int {
 }
 
 func lowestCost(BPDUList []BPDU, rootID string) BPDU {
-	cost := BPDUList[0].Cost
-	for _, b := range BPDUList[1:] {
-		if b.RootID != rootID {
-			continue
-		}
-
-		cost = min(cost, b.Cost)
-	}
-
-	lowestCostBPDU := BPDUList[0]
-
+	var lowestCostBPDU BPDU
+	foundThing := false
 	for _, b := range BPDUList {
 		if b.RootID != rootID {
 			continue
 		}
-
-		if b.Cost == cost {
-			if b.BridgeID < lowestCostBPDU.BridgeID {
+		if !foundThing {
+			lowestCostBPDU = b
+			foundThing = true
+		} else {
+			if b.Cost < lowestCostBPDU.Cost ||
+				(b.Cost == lowestCostBPDU.Cost &&
+					b.BridgeID < lowestCostBPDU.BridgeID) {
 				lowestCostBPDU = b
 			}
 		}
