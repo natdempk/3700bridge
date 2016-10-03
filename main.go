@@ -124,7 +124,6 @@ func main() {
 			LANID:    incomingBPDU.LanID,
 		}
 
-		val, ok := BPDUTable[tableKey]
 		potentialTableEntry := BPDUTableEntry{
 			BPDU:        receivedBPDU,
 			IncomingLAN: incomingBPDU.LanID,
@@ -132,17 +131,23 @@ func main() {
 		}
 
 		// check for previous entry with lesser LanID
-		if ok && (tableKey.LANID <= val.IncomingLAN) {
-			BPDUTable[tableKey] = potentialTableEntry
-		} else if !ok { // or if we have no entry
-			BPDUTable[tableKey] = potentialTableEntry
-		}
+		BPDUTable[tableKey] = potentialTableEntry
 
 		var currentBestBPDU BPDU
 
-		enabledLANConns, rootPort, currentBestBPDU = updateBPDU()
+		enabledLANConnsTemp, rootPortTemp, currentBestBPDU := updateBPDU()
+
+		if compare(enabledLANConnsTemp, enabledLANConns) ||
+			rootPortTemp != rootPortTemp {
+			for k := range forwardingTableMap {
+				delete(forwardingTableMap, k)
+			}
+		}
+		enabledLANConns = enabledLANConnsTemp
+		rootPort = rootPortTemp
 
 		bestCost := currentBestBPDU.Cost
+
 		if initialBPDU.RootID != currentBestBPDU.RootID {
 			bestCost++
 		}
@@ -153,6 +158,27 @@ func main() {
 			BridgeID: initialBPDU.BridgeID,
 		}
 	}
+}
+func compare(a, b map[string]bool) bool {
+	if &a == &b {
+		return true
+
+	}
+
+	if len(a) != len(b) || len(a) != len(b) {
+		return false
+
+	}
+
+	for k, v := range a {
+		if b[k] != v {
+			return false
+
+		}
+
+	}
+	return true
+
 }
 
 func listenForMessage(lanID string, LANConn net.Conn) {
