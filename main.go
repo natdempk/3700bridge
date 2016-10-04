@@ -29,7 +29,7 @@ type LANForwardingEntry struct {
 
 type IncomingBPDU struct {
 	BPDU  Message
-	LanID string
+	LANID string
 }
 
 type BPDUTableEntry struct {
@@ -43,7 +43,7 @@ type BPDUTableKey struct {
 	LANID    string
 }
 
-// maps lanIds to Conns
+// maps LANIDs to Conns
 var LANConns = make(map[string]net.Conn)
 
 // has best scoring root, and path cost
@@ -57,7 +57,7 @@ var designatedBridgeID string
 var rootPort string
 
 // are these enabled lan connections or enabled bridgeIdConnections? I think bridgeIDs
-// then we need to keep the forwarding table of LanID -> bridgeId for that connection
+// then we need to keep the forwarding table of LANID -> bridgeId for that connection
 var enabledLANConns = make(map[string]bool)
 var baseLANs = []string{}
 
@@ -67,8 +67,8 @@ var forwardingTableMap = make(map[string]LANForwardingEntry)
 var BPDUTable = make(map[BPDUTableKey]BPDUTableEntry)
 var receivedBPDUs = make(chan IncomingBPDU)
 
-func padLANID(lanID string) (paddedID string) {
-	return fmt.Sprintf("%c", '\x00') + lanID + strings.Repeat(fmt.Sprintf("%c", '\x00'), 106-len(lanID))
+func padLANID(LANID string) (paddedID string) {
+	return fmt.Sprintf("%c", '\x00') + LANID + strings.Repeat(fmt.Sprintf("%c", '\x00'), 106-len(LANID))
 }
 
 func main() {
@@ -76,24 +76,24 @@ func main() {
 	designatedBridgeID = myBridgeID
 	outgoingBPDU = BPDU{myBridgeID, 0, myBridgeID}
 	initialBPDU = BPDU{myBridgeID, 0, myBridgeID}
-	lanIDs := os.Args[2:]
+	LANIDs := os.Args[2:]
 	fmt.Printf("Bridge %s starting up\n", myBridgeID)
 
-	for _, lanID := range lanIDs {
-		// ignore duplicate lanIDs
-		if _, ok := LANConns[lanID]; ok {
+	for _, LANID := range LANIDs {
+		// ignore duplicate LANIDs
+		if _, ok := LANConns[LANID]; ok {
 			continue
 		}
 
-		conn, err := net.Dial("unixpacket", padLANID(lanID))
+		conn, err := net.Dial("unixpacket", padLANID(LANID))
 		if err != nil {
 			fmt.Println("TERRIBLE ERROR")
 			fmt.Println(err)
 		}
-		LANConns[lanID] = conn
-		enabledLANConns[lanID] = true
-		baseLANs = append(baseLANs, lanID)
-		// fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, lanID)
+		LANConns[LANID] = conn
+		enabledLANConns[LANID] = true
+		baseLANs = append(baseLANs, LANID)
+		// fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, LANID)
 	}
 
 	go func() {
@@ -103,8 +103,8 @@ func main() {
 		}
 	}()
 
-	for lanID, LANConn := range LANConns {
-		go listenForMessage(lanID, LANConn)
+	for LANID, LANConn := range LANConns {
+		go listenForMessage(LANID, LANConn)
 	}
 
 	for {
@@ -121,16 +121,16 @@ func main() {
 		// build potential table entry
 		tableKey := BPDUTableKey{
 			BridgeID: receivedBPDU.BridgeID,
-			LANID:    incomingBPDU.LanID,
+			LANID:    incomingBPDU.LANID,
 		}
 
 		potentialTableEntry := BPDUTableEntry{
 			BPDU:        receivedBPDU,
-			IncomingLAN: incomingBPDU.LanID,
+			IncomingLAN: incomingBPDU.LANID,
 			CreatedAt:   time.Now(),
 		}
 
-		// check for previous entry with lesser LanID
+		// check for previous entry with lesser LANID
 		BPDUTable[tableKey] = potentialTableEntry
 
 		var currentBestBPDU BPDU
@@ -174,7 +174,7 @@ func main() {
 		}
 	}
 }
-func listenForMessage(lanID string, LANConn net.Conn) {
+func listenForMessage(LANID string, LANConn net.Conn) {
 	d := json.NewDecoder(LANConn)
 	for {
 
@@ -186,20 +186,20 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 		}
 
 		if unknownMessage.Type == "bpdu" {
-			// updateBPDU(unknownMessage, lanID)
+			// updateBPDU(unknownMessage, LANID)
 			receivedBPDUs <- IncomingBPDU{BPDU: unknownMessage,
-				LanID: lanID,
+				LANID: LANID,
 			}
 
 		} else {
-			fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
-			if enabledLANConns[lanID] {
+			fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], LANID, unknownMessage.Source, unknownMessage.Dest)
+			if enabledLANConns[LANID] {
 				forwardingTableMap[unknownMessage.Source] = LANForwardingEntry{
-					LANID:     lanID,
+					LANID:     LANID,
 					CreatedAt: time.Now(),
 				}
 
-				sendData(unknownMessage, lanID)
+				sendData(unknownMessage, LANID)
 			}
 		}
 	}
@@ -239,13 +239,13 @@ func broadcastBPDU(bpdu BPDU) {
 		Type:    "bpdu",
 		Message: dataMessage}
 
-	for lanID, conn := range LANConns {
+	for LANID, conn := range LANConns {
 		bytes, err := json.Marshal(message)
 		if err != nil {
 			fmt.Println("marshal error")
 			fmt.Println(err)
 		}
-		fmt.Println(lanID, "sent bpdu")
+		fmt.Println(LANID, "sent bpdu")
 		fmt.Fprintf(conn, string(bytes))
 	}
 }
@@ -258,8 +258,8 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 	enabledLANs = make(map[string]bool)
 
 	// initialize BPDULans
-	for _, lanID := range baseLANs {
-		BPDULans[lanID] = []BPDU{}
+	for _, LANID := range baseLANs {
+		BPDULans[LANID] = []BPDU{}
 	}
 
 	// delete expired entries
