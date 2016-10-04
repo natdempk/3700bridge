@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// Message represents a BPDU or data message sent on the wire
 type Message struct {
 	Source  string                 `json:"source"`
 	Dest    string                 `json:"dest"`
@@ -16,57 +17,73 @@ type Message struct {
 	Message map[string]interface{} `json:"message"`
 }
 
+// BPDU represents the core information of a BPDU message
 type BPDU struct {
 	RootID   string `json:"root"`
 	Cost     int    `json:"cost"`
 	BridgeID string `json:"id"`
 }
 
+// LANForwardingEntry represents a LANID to forward data packets to and the time the entry was created
 type LANForwardingEntry struct {
 	LANID     string
 	CreatedAt time.Time
 }
 
+// IncomingBPDU represents a BPDU Message and the LANID it came from
 type IncomingBPDU struct {
 	BPDU  Message
 	LANID string
 }
 
+// BPDUTableEntry represents a BPDU, the LANID it came from, and the time it was created at
 type BPDUTableEntry struct {
 	BPDU        BPDU
 	IncomingLAN string
 	CreatedAt   time.Time
 }
 
+// BPDUTableKey represents the BridgeID and LANID that a BPDU came from
 type BPDUTableKey struct {
 	BridgeID string
 	LANID    string
 }
 
-// maps LANIDs to Conns
+// global state variables
+
+// LANConns maps LANIDs to socket Conns
 var LANConns = make(map[string]net.Conn)
 
-// has best scoring root, and path cost
-// always our bridgeID because this is the BPDU we broadcast to others
-//var bestScoringBPDU BPDU
-var outgoingBPDU BPDU
+// initialBPDU contains our starting BPDU message that is initially broadcast to other bridges
 var initialBPDU BPDU
 
-// this is the next hop bridge to root
+// outgoingBPDU contains the best BPDU message that we have seen, that we will currently broadcast to other bridges
+var outgoingBPDU BPDU
+
+// deignatedBridgeID contains the bridgeID of the next bridge that leads us to the root
 var designatedBridgeID string
+
+// rootPort contains the port (LANID) that leads us to the root
 var rootPort string
 
-// are these enabled lan connections or enabled bridgeIdConnections? I think bridgeIDs
-// then we need to keep the forwarding table of LANID -> bridgeId for that connection
+// enabledLANConns maps LANIDs to booleans indicating whether we send and receive data for them
 var enabledLANConns = make(map[string]bool)
+
+// baseLANs contains all of the LANIDs that are connected to our bridge at startup
+// TODO: do we need to update this if we stop receiving BPDUs from a bridge? might save us some overhead when one drops
 var baseLANs = []string{}
 
-//var forwardingTable []LANForwardingEntry
+// forwardingTableMap maps LANIDs to their forwarding table entries, indicating where we should send data packets
 var forwardingTableMap = make(map[string]LANForwardingEntry)
 
+// BPDUTable keeps track of all the BPDUs we have seen for a given (BridgeID, LANID) pair and when we have seen them
+// this allows us to easily compute the best scoring BPDU we have seen recently
 var BPDUTable = make(map[BPDUTableKey]BPDUTableEntry)
+
+// receivedBPDUs acts as a singular store for BPDUs that we have received from LANs so one routine can process them
 var receivedBPDUs = make(chan IncomingBPDU)
 
+// adds null bytes to the LANID so we can use it as a unix domain socket
 func padLANID(LANID string) (paddedID string) {
 	return fmt.Sprintf("%c", '\x00') + LANID + strings.Repeat(fmt.Sprintf("%c", '\x00'), 106-len(LANID))
 }
@@ -174,6 +191,8 @@ func main() {
 		}
 	}
 }
+
+// reads in messages from a LAN connection, parsing BPDUs and forwarding data messages
 func listenForMessage(LANID string, LANConn net.Conn) {
 	d := json.NewDecoder(LANConn)
 	for {
@@ -205,6 +224,7 @@ func listenForMessage(LANID string, LANConn net.Conn) {
 	}
 }
 
+// forwards or broadcasts data messages
 func sendData(message Message, incomingLan string) {
 	if tableEntry, ok := forwardingTableMap[message.Dest]; ok && time.Since(tableEntry.CreatedAt).Seconds() < 5.0 {
 		if tableEntry.LANID != incomingLan { // if where we would forward to is where we got the message from
@@ -228,6 +248,7 @@ func sendData(message Message, incomingLan string) {
 	}
 }
 
+// broadcasts BPDUs on all LANs
 func broadcastBPDU(bpdu BPDU) {
 	dataMessage := make(map[string]interface{})
 	dataMessage["id"] = outgoingBPDU.BridgeID
@@ -250,9 +271,8 @@ func broadcastBPDU(bpdu BPDU) {
 	}
 }
 
+// computes enabled/disabledLANs, our designated port/LANID, and the BPDU we should broadcast to others
 func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, currentBestBPDU BPDU) {
-	//fmt.Println(receivedBPDU, incomingLan)
-
 	currentBestBPDU = initialBPDU
 	BPDULans := make(map[string][]BPDU)
 	enabledLANs = make(map[string]bool)
@@ -309,6 +329,7 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 	return
 }
 
+// computes the lowest cost BPDU from a list of BPDUs for a given rootID
 func lowestCost(BPDUList []BPDU, rootID string) BPDU {
 	var lowestCostBPDU BPDU
 	foundThing := false
