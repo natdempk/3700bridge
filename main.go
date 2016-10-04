@@ -143,6 +143,21 @@ func main() {
 				delete(forwardingTableMap, k)
 			}
 		}
+
+		if newRootPort != rootPort {
+			fmt.Printf("New Root: %s/%s\n", initialBPDU.BridgeID, newRootPort)
+		}
+
+		for port, enabled := range newEnabledLANConns {
+			// if newly enabled or disabled
+			if enabled != enabledLANConns[port] && port != newRootPort {
+				if enabled {
+					fmt.Printf("Designated Port: %s/%s\n", initialBPDU.BridgeID, port)
+				} else {
+					fmt.Printf("Disabled Port: %s/%s\n", initialBPDU.BridgeID, port)
+				}
+			}
+		}
 		enabledLANConns = newEnabledLANConns
 		rootPort = newRootPort
 
@@ -177,8 +192,7 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 			}
 
 		} else {
-			fmt.Println(enabledLANConns)
-			// fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
+			fmt.Printf("Received message %v on port %s from %s to %s\n", unknownMessage.Message["id"], lanID, unknownMessage.Source, unknownMessage.Dest)
 			if enabledLANConns[lanID] {
 				forwardingTableMap[unknownMessage.Source] = LANForwardingEntry{
 					LANID:     lanID,
@@ -192,14 +206,17 @@ func listenForMessage(lanID string, LANConn net.Conn) {
 }
 
 func sendData(message Message, incomingLan string) {
-	fmt.Println(enabledLANConns)
 	if tableEntry, ok := forwardingTableMap[message.Dest]; ok && time.Since(tableEntry.CreatedAt).Seconds() < 5.0 {
 		if tableEntry.LANID != incomingLan { // if where we would forward to is where we got the message from
 			conn, _ := LANConns[tableEntry.LANID]
 			bytes, _ := json.Marshal(message)
 			fmt.Fprintf(conn, string(bytes))
+			fmt.Printf("Forwarding message %s to port %s", message.Message["id"], tableEntry.LANID)
+		} else {
+			fmt.Printf("Not forwarding message %s", message.Message["id"])
 		}
 	} else { // we don't know where to send our message, so we send it everywhere except the incoming port
+		fmt.Printf("Broadcasting message %s to all ports", message.Message["id"])
 		// for each active port, send the message
 		for k, v := range enabledLANConns {
 			if k != incomingLan && v {
