@@ -70,7 +70,6 @@ var rootPort string
 var enabledLANConns = make(map[string]bool)
 
 // baseLANs contains all of the LANIDs that are connected to our bridge at startup
-// TODO: do we need to update this if we stop receiving BPDUs from a bridge? might save us some overhead when one drops
 var baseLANs = []string{}
 
 // forwardingTableMap maps LANIDs to their forwarding table entries, indicating where we should send data packets
@@ -110,7 +109,6 @@ func main() {
 		LANConns[LANID] = conn
 		enabledLANConns[LANID] = true
 		baseLANs = append(baseLANs, LANID)
-		// fmt.Printf("Designated port: %s/%s\n", bestScoringBPDU.BridgeID, LANID)
 	}
 
 	go func() {
@@ -205,7 +203,6 @@ func listenForMessage(LANID string, LANConn net.Conn) {
 		}
 
 		if unknownMessage.Type == "bpdu" {
-			// updateBPDU(unknownMessage, LANID)
 			receivedBPDUs <- IncomingBPDU{BPDU: unknownMessage,
 				LANID: LANID,
 			}
@@ -305,7 +302,7 @@ func updateBPDU() (enabledLANs map[string]bool, currentBestLANID string, current
 
 	for LANID, BPDUs := range BPDULans {
 		if len(BPDUs) == 0 {
-			// enable LANs we got not BPDUs from
+			// enable LANs we got no BPDUs from
 			enabledLANs[LANID] = true
 		} else {
 			lowestCostBPDU := lowestCost(BPDUs, currentBestBPDU.RootID)
