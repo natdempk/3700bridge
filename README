@@ -1,0 +1,22 @@
+3700bridge
+CS3700 - Project 2
+Nathaniel Dempkowski and Sean Andrews, Team project2
+
+High-level Approach
+===================
+
+We initially setup connections for each LAN that our bridge is connected to, deduplicating ports that are connected multiple times. We have an asynchronous goroutine which broadcasts our BPDU every 500ms. We also have goroutines for each LAN connection that listen for new messages from those LANs and parse them. These routines either write BPDU messages to a channel or forward/broadcast data messages. We have another looping routine which processes BPDUs from the received BPDU channel and builds a table of all of the BPDUs we have received that are not expired. Based on this table of (LAN, port) -> (BPDU, time), we are then able to compute the best scoring BPDU we have seen very easily. Additionally, this routine and table make computing enabled LAN connections and root ports relatively easy. It also makes this given a BPDU table as input. These routines work together nicely so that we can separate concerns within our program and decompose it into functions that are easily understood.
+
+Challenges Faced
+================
+
+We think that the largest challenge in this project was making our BPDU decision algorithm straightforward enough so that we could actually reason about it and confirm it was correct for all the various cases. For the milestone we attempted to do a comparison between BPDUs as we received them, only ever comparing one BPDU to another. This sounded good, as it matched what was presented in the slides in class, but we found it hard to reason about the actions that should be taken as a result of a BPDU. Trying to maintain all of the state around the LANs with this approach was too difficult to understand, and introduced a lot of issues around when we should perform specific actions. We decided instead to keep a table, as described in our high-level approach. This enabled us to simplify our BPDU decision logic, LAN port enabling logic, and moved all of our logic into a straightforward testable method. 
+
+Besides the BPDU logic challenges, I think the other thing that was challenging was learning to use more features of Go. We had to learn to organize our code to make it more understandable, and we also utilized more complex features of the language like goroutines and channels.
+
+
+Testing
+=======
+
+We mainly utilized the test scripts and manual debugging of problems to verify that our code was behaving as expected. We mapped out a bunch of the network layouts on paper and compared their BPDU spanning tress to what our bridges were computing. Most of the debugging was done using simple print statements, as none of our code or problem cases were so complex that we had no idea what to look at. We also wrote a couple of basic tests to verify problem functionality we identified in the BPDU decision logic so that we could fix it and test our fixes more easily. 
+
